@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-route-watch"
+version = "0.1.0"
+description = "Evidence-based Claude routing scores and alerts for Mihomo and Clash Verge"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[project.scripts]
+claude-route-watch = "claude_route_watch:main"
+
+[tool.setuptools]
+py-modules = ["claude_route_watch"]
