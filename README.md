@@ -3,7 +3,7 @@
 [![CI](https://github.com/majiayu000/claude-route-watch/actions/workflows/ci.yml/badge.svg)](https://github.com/majiayu000/claude-route-watch/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Explainable **routing scores** and local alerts for Claude traffic observed by Mihomo / Clash Verge. A single Python module, zero runtime dependencies, read-only controller access. CLI and callable scoring function included.
+Explainable **routing scores** and local alerts for Claude traffic observed by Mihomo / Clash Verge. A small Python library, zero runtime dependencies, read-only controller access. CLI and callable scoring function included. Optional route-verified exit probes and source-attributed IP intelligence are available in v0.2.0.
 
 **A score is not an account-ban probability.** 100 means the observed connections matched your routing expectation with TUN enabled. It does not certify your IP reputation, physical location, account eligibility, or future access. No affiliation with Anthropic or MetaCubeX.
 
@@ -30,7 +30,25 @@ For a custom Unix controller:
 claude-route-watch --socket /path/to/mihomo.sock --config /path/to/config.yaml --expect 'YOUR FINAL PROXY NODE'
 ```
 
-The config file is read only for its top-level scalar `secret`. `MIHOMO_SECRET` can supply/override the controller secret without exposing it in command-line arguments. Use your existing secure environment or config; do not commit credentials. The tool calls only `GET /configs` and `GET /connections`. It never changes selectors, terminates connections, queries your account, or sends API prompts.
+The config file is read only for its top-level scalar `secret`. `MIHOMO_SECRET` can supply/override the controller secret without exposing it in command-line arguments. Use your existing secure environment or config; do not commit credentials. Controller access uses only `GET /configs` and `GET /connections`. Optional `--reputation` makes external read-only HTTPS probes/lookups, described below. It never changes selectors, terminates connections, queries your account, or sends API prompts.
+
+## Optional IP reputation (v0.2.0)
+
+```sh
+.venv/bin/claude-route-watch --expect 'YOUR FINAL PROXY NODE' --reputation \
+  --proxy http://127.0.0.1:7890
+```
+
+Three fresh echo connections are correlated with Mihomo by socket address/port and hostname. A probe that cannot be attributed to the expected final node stops reputation lookup. Every observed exit IP gets a separate report, preserving vendor data rather than inventing a ban score.
+
+- **ipapi.is**: location/ASN ownership; optional keyed VPN/proxy/datacenter/Tor/abuse flags and labeled network-wide abuse fractions.
+- **Scamalytics v3**: original fraud score, ISP score, risk labels, proxy types and source-attributed blacklist evidence; user credentials required.
+- **AbuseIPDB**: original abuse confidence, 90-day report counts and report age; user key required.
+- IP stability/change, country/flag disagreements, explicit nulls, missing credentials, source errors, timestamps and cache age.
+
+No `--reputation`, no third-party calls. Missing keys produce partial/skipped evidence, not a passing IP score. All source queries use an explicit loopback HTTP proxy. Source lookups run separately from the watch sampler, are cached, and respect provider cooldowns. The echo-service IP is not proof of the IP Anthropic sees.
+
+**[Full IP-reputation guide](docs/ip-reputation.md)**: credential variables, attribution, score meanings, report fields, failure cases, alerts, cache/quotas, library API, and live versus synthetic acceptance evidence.
 
 ## Scoring v1: higher means closer to the expected routing
 
@@ -81,7 +99,7 @@ assert report["score"] == 100
 
 Claude is identified by its CLI/Desktop process, native installation path, or Anthropic/Claude domains. This covers version-number process names and browser authentication to known domains. It excludes unrelated browser Sentry traffic. It does not classify arbitrary child `git`, `npm`, SSH, or MCP traffic as Claude identity traffic.
 
-Watch mode samples every two seconds. Changed scores or warning sets produce JSON lines; unchanged state is quiet. Use `--interval` and `--duration` for a bounded observation. Notifications report warnings, unknown state, and recovery; zero connections is unknown, not evidence of account trouble. Exit codes: 0 observed OK, 1 warning, 2 unknown/invalid invocation.
+Watch mode samples every two seconds. Changed scores or warning sets produce JSON lines; unchanged routing state is quiet. Optional IP intelligence also emits timestamped refresh-start/completion reports. Use `--interval` and `--duration` for a bounded observation. Notifications report warnings, unknown state, and recovery; zero connections is unknown, not evidence of account trouble. Routing-only exit codes: 0 observed OK, 1 warning, 2 unknown/invalid invocation. With IP intelligence enabled, incomplete source coverage also returns 2; see the full guide for priorities.
 
 ```sh
 claude-route-watch --test-notification
@@ -92,15 +110,15 @@ Notification Center permissions and Focus settings can hide a notification. A su
 ## Boundaries and privacy
 
 - Only active connections visible to Mihomo are scored. Short-lived traffic between samples and connections bypassing Mihomo can be missed. No packet capture or TLS interception.
-- Node-name consistency is not public-IP consistency. A node can change IP behind the same name. DNS leaks, IPv6 escapes, ASN/IP reputation, geography, latency, account status, and eligibility are **unmeasured** and do not receive invented points.
+- Node-name consistency is not public-IP consistency. A node can change IP behind the same name. Optional IP intelligence observes echo-service exits and vendor-reported ownership, geography and reputation separately. DNS leaks, independent IPv6 escapes, latency, account status, and eligibility remain **unmeasured** and do not receive invented points.
 - This tool cannot determine why an account is restricted, or infer that a working network makes an account safe. Anthropic lists multiple [suspension reasons](https://support.claude.com/en/articles/8241253-safeguards-warnings-and-appeals).
-- No telemetry, cloud backend, or automatic report upload. JSON output includes destination hosts and node names; redact reports before sharing. Secrets and process paths are not emitted.
+- No project telemetry, cloud backend, or automatic report upload. Opt-in IP checks contact third-party services with the queried public IP and any configured API account credentials; see the guide before enabling. JSON output includes destination hosts and node names; redact reports before sharing. Secrets and process paths are not emitted.
 
 ## Validation and design decision
 
 Run `python3 -m unittest discover -v`. Scoring tests cover direct-traffic dilution, wrong-node caps, mixed old/current routes, unknown evidence, version-number processes, browser authentication, unrelated telemetry, TUN-off warnings, and API failure without credential leakage. CI builds the distribution and tests Python 3.10/3.13 on macOS/Linux; its badge reflects actual workflow status, not a claim of live cross-platform acceptance.
 
-The predecessor was exercised against live macOS Clash Verge API/download/log/bridge connections. The scoring version was exercised on the same macOS controller: 44 visible Claude-process/domain connections matched the specified node and scored 100. The installed CLI was also checked independently. Real direct-traffic and route-change incidents are exercised by injected snapshots, not by changing a user's network. Notification display, long-running behavior, IDE login refresh, and non-macOS live controllers remain unverified.
+The predecessor was exercised against live macOS Clash Verge API/download/log/bridge connections. The scoring version was exercised on the same macOS controller: 44 visible Claude-process/domain connections matched the specified node and scored 100. The installed CLI was also checked independently. The v0.2.0 exit-probe and anonymous-source behavior were exercised separately; authenticated sources remain validated with synthetic responses only. Real direct-traffic and route-change incidents are exercised by injected snapshots, not by changing a user's network. Notification display, long-running behavior, IDE login refresh, and non-macOS live controllers remain unverified.
 
 Decision: ship a small local observer with explainable routing points; do not publish a ban predictor. Unknown evidence must never become a green score. Do not use this as a complete network-enforcement boundary.
 

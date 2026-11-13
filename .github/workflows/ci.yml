@@ -18,3 +18,4 @@ jobs:
       - run: python -m unittest discover -v
       - run: python -m pip wheel --no-deps . --wheel-dir dist
       - run: claude-route-watch --help
+        working-directory: ${{ runner.temp }}
