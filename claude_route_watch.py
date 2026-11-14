@@ -6,11 +6,16 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
 import re
 import shlex
 import socket
 import subprocess
+import threading
 import time
+
+from exit_probe import parse_proxy
+from ip_reputation import collect_reputation
 
 
 class UnixHTTP(http.client.HTTPConnection):
@@ -105,6 +110,7 @@ def analyze(config, connections, expected):
         'scoring_version': 1, 'score': score, 'status': status, 'expected': expected,
         'scope': 'Mihomo-visible active Claude connections only',
         'observed_connections': total, 'components': components,
+        'observed_endpoints': sorted(endpoints),
         'issues': sorted(issues),
         'connections': [{'host': k[0], 'route': k[1], 'count': v} for k, v in sorted(summary.items())],
     }
@@ -127,18 +133,48 @@ def main():
     parser.add_argument('--test-notification', action='store_true')
     parser.add_argument('--interval', type=float, default=2, help='Sampling interval in seconds')
     parser.add_argument('--duration', type=float, default=0, help='Stop after this many seconds; 0: continuous')
+    parser.add_argument('--reputation', action='store_true', help='Opt in to routed exit probes and third-party IP intelligence')
+    parser.add_argument('--proxy', default=os.environ.get('CLAUDE_ROUTE_PROXY'), help='Explicit loopback HTTP proxy URL; or CLAUDE_ROUTE_PROXY')
+    parser.add_argument('--reputation-interval', type=float, default=300, help='Watch-mode exit check interval (seconds); vendor results cached for one hour')
     args = parser.parse_args()
     if not math.isfinite(args.interval) or not math.isfinite(args.duration) or args.interval <= 0 or args.duration < 0:
         parser.error('interval must be positive and duration nonnegative; both must be finite')
+    if not math.isfinite(args.reputation_interval) or args.reputation_interval <= 0:
+        parser.error('reputation-interval must be positive and finite')
     if args.test_notification:
         notify('Claude Route Watch: TEST', 'Test notification only. No routing or account incident detected.')
         print('Test notification submitted. Check Notification Center for actual delivery.')
         return 0
     if not args.expect or args.expect.upper() in ('DIRECT', 'REJECT', 'REJECT-DROP'):
         parser.error('--expect must name the expected final proxy node')
+    if args.reputation:
+        try:
+            parse_proxy(args.proxy)
+        except ValueError as error:
+            parser.error(str(error))
     last = None
+    last_notice = None
+    reputation = None
+    cache = {}
+    previous_ips = None
+    worker = None
+    results = queue.SimpleQueue()
+    next_check = 0
     started = time.monotonic()
+
+    def check_reputation():
+        try:
+            result = collect_reputation(args.proxy, args.expect,
+                                        lambda: request('/connections', args.config, args.socket),
+                                        cache=cache, previous_ips=previous_ips)
+        except Exception as error:
+            # This is the background-job boundary: surface failure instead of losing the worker silently.
+            result = {'status': 'unknown', 'ip_reports': [], 'error_type': type(error).__name__,
+                      'warnings': ['IP intelligence job failed; evidence is unavailable']}
+        results.put(result)
+
     while True:
+        runtime_available = True
         try:
             report = analyze(request('/configs', args.config, args.socket),
                              request('/connections', args.config, args.socket), args.expect)
@@ -146,21 +182,64 @@ def main():
             # Never print raw exceptions: they may contain credentials or local paths.
             report = {'scoring_version': 1, 'score': None, 'status': 'unknown',
                       'expected': args.expect, 'issues': ['Cannot read Mihomo runtime; monitoring unavailable']}
+            runtime_available = False
+        if args.reputation:
+            try:
+                reputation = results.get_nowait()
+                worker = None
+                next_check = time.monotonic() + args.reputation_interval
+                if reputation.get('probe', {}).get('status') == 'verified':
+                    previous_ips = reputation['probe']['ips']
+            except queue.Empty:
+                pass
+            if runtime_available and worker is None and time.monotonic() >= next_check:
+                if args.watch:
+                    # Slow vendor APIs must not pause the routing sampler. No service or disk state.
+                    worker = threading.Thread(target=check_reputation, daemon=True)
+                    worker.start()
+                    if reputation is None:
+                        reputation = {'status': 'pending', 'ip_reports': [], 'warnings': []}
+                else:
+                    check_reputation()
+                    reputation = results.get_nowait()
+            if reputation is None:
+                reputation = {'status': 'unknown', 'ip_reports': [],
+                              'warnings': ['Controller unavailable; exit was not probed']}
+            # Keep lookup evidence timestamped. A failed current controller never becomes a green report.
+            report['reputation'] = dict(reputation)
+            report['reputation']['claude_node_comparison'] = (
+                'no_active_claude_evidence' if not report.get('observed_connections') else
+                ('same_expected_node_observed_not_same_ip_proof' if report.get('observed_endpoints') == [args.expect]
+                 else 'claude_node_mismatch_or_incomplete'))
+            report['reputation']['refresh_in_progress'] = worker is not None
         issues = report['issues']
-        fingerprint = (report['status'], report['score'], tuple(issues))
+        rep = report.get('reputation', {})
+        fingerprint = (report['status'], report['score'], tuple(issues), json.dumps(rep, sort_keys=True))
         if fingerprint != last:
             report['time'] = time.strftime('%Y-%m-%d %H:%M:%S%z')
             print(json.dumps(report, ensure_ascii=False), flush=True)
-            recovered = last is not None and (bool(last[2]) or last[1] is None) and not issues and report['score'] is not None
-            if args.notify and (issues or recovered or report['score'] is None):
+            notices = issues + rep.get('warnings', [])
+            unknown = report['score'] is None or rep.get('status') in ('unknown', 'partial')
+            notice = (tuple(notices), unknown)
+            recovered = last_notice is not None and (bool(last_notice[0]) or last_notice[1]) and not notices and not unknown
+            if args.notify and notice != last_notice and (notices or recovered or unknown):
                 try:
-                    notify('Claude routing warning' if issues else 'Claude routing status',
-                           '; '.join(issues)[:600] if issues else report['status'])
+                    notify('Claude network observation', '; '.join(notices)[:600] if notices else
+                           ('Incomplete evidence: inspect terminal report' if unknown else 'Observation recovered'))
                 except (OSError, subprocess.TimeoutExpired, RuntimeError):
                     print('Notification delivery failed; see terminal report.', flush=True)
             last = fingerprint
+            last_notice = notice
         if not args.watch or (args.duration and time.monotonic() - started >= args.duration):
-            return 2 if report['score'] is None else (1 if issues else 0)
+            if report['score'] is None:
+                return 2
+            if issues:
+                return 1
+            if rep.get('status') in ('unknown', 'pending'):
+                return 2
+            if rep.get('warnings'):
+                return 1
+            return 2 if rep.get('status') == 'partial' else 0
         remaining = args.duration - (time.monotonic() - started) if args.duration else args.interval
         time.sleep(max(0, min(args.interval, remaining)))
 
