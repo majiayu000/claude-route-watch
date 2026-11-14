@@ -299,14 +299,14 @@ def lookup_reputation(ips, proxy, *, cache=None, credentials=None):
             'interpretation': 'Vendor evidence only: no aggregate IP safety score or Claude-ban probability'}
 
 
-def collect_reputation(proxy, expected, read_connections, *, cache=None, previous_ips=None):
+def collect_reputation(proxy, expected, read_connections, *, cache=None, previous_ips=None, credentials=None):
     from exit_probe import probe_exit
     probe = probe_exit(proxy, expected, read_connections)
     if probe['status'] != 'verified':
         return {'status': 'unknown', 'checked_at': utc_now(), 'probe': probe,
                 'ip_reports': [], 'change_since_previous_check': None,
                 'warnings': ['Exit probe is not fully route-verified; reputation lookup was not performed']}
-    result = lookup_reputation(probe['ips'], proxy, cache=cache)
+    result = lookup_reputation(probe['ips'], proxy, cache=cache, credentials=credentials)
     result['probe'] = probe
     result['change_since_previous_check'] = {
         'previous_ips': previous_ips, 'current_ips': probe['ips'],

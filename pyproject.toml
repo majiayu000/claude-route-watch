@@ -4,14 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-route-watch"
-version = "0.2.0"
+version = "0.3.0"
 description = "Evidence-based Claude routing scores and alerts for Mihomo and Clash Verge"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 
+[project.optional-dependencies]
+desktop = ["pywebview>=6.2,<7"]
+
 [project.scripts]
 claude-route-watch = "claude_route_watch:main"
+
+[project.gui-scripts]
+claude-route-watch-app = "desktop:main"
 
 [project.urls]
 Repository = "https://github.com/majiayu000/claude-route-watch"
@@ -19,4 +25,7 @@ Documentation = "https://github.com/majiayu000/claude-route-watch/blob/main/docs
 Issues = "https://github.com/majiayu000/claude-route-watch/issues"
 
 [tool.setuptools]
-py-modules = ["claude_route_watch", "exit_probe", "ip_reputation"]
+py-modules = ["claude_route_watch", "exit_probe", "ip_reputation", "desktop"]
+
+[tool.setuptools.data-files]
+"docs" = ["docs/app.html"]

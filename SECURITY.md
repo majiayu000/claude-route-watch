@@ -5,3 +5,5 @@ Report vulnerabilities privately through [GitHub Security Advisories](https://gi
 The controller secret stays on the local machine. This observer is read-only, but is not a firewall or a guarantee against traffic escaping Mihomo.
 
 Optional IP intelligence sends public exit IPs to third-party services only after explicit opt-in. Keys stay in the local environment or an explicitly supplied library mapping. The tool does not emit provider request URLs or raw error bodies. Source schemas are parsed at the network boundary; missing data never becomes a clean result. Never include full live reports in public issues without redacting IPs, private hosts, and node labels.
+
+The native desktop loads only its bundled offline page and exposes narrow Python bridge methods. Dynamic node/provider text is rendered as text, not HTML, and the page has no external network access. It opens no application HTTP control port. Desktop credentials stay in session memory and are excluded from status responses and saved preferences. Only non-credential monitoring preferences are persisted, with owner-only file permissions.

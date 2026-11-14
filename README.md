@@ -3,11 +3,23 @@
 [![CI](https://github.com/majiayu000/claude-route-watch/actions/workflows/ci.yml/badge.svg)](https://github.com/majiayu000/claude-route-watch/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Explainable **routing scores** and local alerts for Claude traffic observed by Mihomo / Clash Verge. A small Python library, zero runtime dependencies, read-only controller access. CLI and callable scoring function included. Optional route-verified exit probes and source-attributed IP intelligence are available in v0.2.0.
+Explainable **routing scores** and local alerts for Claude traffic observed by Mihomo / Clash Verge. A small Python library with a native macOS app and read-only controller access. The CLI has zero runtime dependencies. CLI and callable scoring function included. Optional route-verified exit probes and source-attributed IP intelligence are available in v0.2.0.
 
 **A score is not an account-ban probability.** 100 means the observed connections matched your routing expectation with TUN enabled. It does not certify your IP reputation, physical location, account eligibility, or future access. No affiliation with Anthropic or MetaCubeX.
 
-## Install and run
+## Desktop app — no commands
+
+**[Download the macOS Apple Silicon preview](https://github.com/majiayu000/claude-route-watch/releases/tag/v0.3.0-preview.1)**
+
+1. Unzip, move **Claude Route Watch.app** into Applications, and double-click it. No Python, Terminal, or package installation is needed.
+2. Keep Clash Verge running. The app discovers its controller, HTTP/mixed port, and Claude's current node. Confirm the suggested node with **开始监测** (Start monitoring).
+3. For optional exit/IP intelligence, turn on **开启 IP 检查**. Basic ownership works without keys. Full provider keys can be entered in the optional panel; they stay in memory for this launch only.
+
+The app remembers your explicitly chosen baseline, monitoring state, and notification preference. It never silently adopts a changed route. IP queries start off on each launch. Minimize the window to continue watching; closing it exits the app. No login service or hidden daemon is installed.
+
+This preview is **ad-hoc signed, not Developer ID signed or notarized**. macOS may require approval for a downloaded app; do not disable Gatekeeper globally. The packaged preview targets Apple Silicon macOS and Clash Verge; Windows GUI/controller support is not implemented.
+
+## CLI and library installation (developers)
 
 Python 3.10+ required. The current integration uses a **Unix socket**, auto-detects **Clash Verge on macOS**, and sends optional macOS notifications. Other Unix Mihomo installations can supply socket/config paths; live verification so far covers macOS only. Windows controller access is not implemented.
 

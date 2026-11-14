@@ -2,7 +2,13 @@
 
 This feature answers two separate questions: **which public IP did a route-verified echo request use**, and **what do external intelligence providers report about that IP**? It does not expose Anthropic's risk decisions or predict account suspension.
 
-## Enable explicitly
+## Desktop: no commands or environment variables
+
+The macOS preview discovers Clash Verge and suggests the observed Claude node. Click **开始监测** to pin the baseline, then **开启 IP 检查** to opt into third-party probes. Full keys are optional password fields in the collapsed settings panel. They are session-only, never saved to the preferences file or `.env`. The desktop passes that explicit credential mapping to the same library used by the CLI.
+
+Only the expected node, monitoring state, and notification preference are saved under `~/Library/Application Support/Claude Route Watch/settings.json`. A missing or changed node is never silently replaced. IP opt-in and keys reset when the app closes; minimize to continue watching. Native acceptance on macOS confirmed discovery, start, IP results, pause, close/exit, and restored baseline on relaunch. Notification display and authenticated vendor calls remain unverified.
+
+## Enable explicitly from the CLI
 
 ```sh
 claude-route-watch --expect 'YOUR FINAL NODE' --reputation \
