@@ -58,8 +58,22 @@ class Verdicts(unittest.TestCase):
         view = views.route_view(report)
         self.assertEqual(view['verdict'], ('线路正常', 'vok'))
         self.assertIn('换了节点，出口没变', view['why'])
+        self.assertNotIn('…', plain(view, 80)[0])  # The switched-node line must not be cut at 80 columns.
+        self.assertFalse(any('…' in line for line in plain(view, 80)))
         report['exit'] = dict(report['exit'], status='changed', current_ips=['9.9.9.9'])
         self.assertEqual(views.route_view(report)['verdict'], ('出口变了', 'vbad'))
+
+    def test_watch_notifies_once_when_the_screen_turns_red(self):
+        import terminal
+        sent = []
+        output = terminal.watch_output(panels.Region(), send=lambda title, body: sent.append(title))
+        same = route(endpoints=('Other',), reputation=verified(item()))
+        same['exit'] = {'status': 'matches', 'baseline_ips': [IP], 'current_ips': [IP]}
+        moved = dict(same, exit=dict(same['exit'], status='changed', current_ips=['9.9.9.9']))
+        with patch('sys.stdout', io.StringIO()):
+            for report in (same, moved, moved, same, moved):
+                output(report)
+        self.assertEqual(sent, ['Claude 线路：出口变了'] * 2)
 
     def test_risky_source_turns_only_the_source_box_red(self):
         view = views.route_view(route(reputation=verified(item(95))))

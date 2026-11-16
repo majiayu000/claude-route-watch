@@ -2,6 +2,7 @@
 import http.client
 import platform
 import shutil
+import subprocess
 import sys
 import unicodedata
 
@@ -199,6 +200,26 @@ def choose(prompt, options):
         print('请输入列表中的数字。')
 
 
+def watch_output(region, send=None):
+    """Redraw the watch view; a macOS notification only when the screen turns red or its red reason changes."""
+    if send is None and sys.platform == 'darwin':
+        from claude_route_watch import notify as send
+    last = [None]
+
+    def output(report):
+        view = views.route_view(report, watching=True)
+        region.draw(view)
+        label, tone = view['verdict']
+        alert = (label, view['why']) if tone == 'vbad' else None
+        if alert and alert != last[0] and send is not None:
+            try:
+                send('Claude 线路：' + label, view['why'])
+            except (OSError, subprocess.TimeoutExpired, RuntimeError):
+                pass  # The red screen already says it; a failed notification must not break the redraw.
+        last[0] = alert
+    return output
+
+
 def route_check(config_path=None, socket_path=None, watch=False):
     from claude_route_watch import belongs_to_claude, main, request
     try:
@@ -233,9 +254,8 @@ def route_check(config_path=None, socket_path=None, watch=False):
             args += ['--reputation', '--proxy', f'http://127.0.0.1:{port}']
     if watch:
         args += ['--watch']
-        region = panels.Region()
         print()
-        return main(args, report_output=lambda report: region.draw(views.route_view(report, watching=True)))
+        return main(args, report_output=watch_output(panels.Region()))
     while True:
         reports = []
         result = with_progress(views.progress_view('route', nodes[selected]),
