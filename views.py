@@ -207,7 +207,7 @@ def route_rows(report):
         rows.append(kv('实际', [seg(' / '.join(endpoints), 'badb')]))
     else:
         rows.append(kv('实际', [seg(' / '.join(endpoints), '' if state == 'matches' else 'warnb')]))
-        rows.append(kv('', {'matches': '换了节点，出口 IP 没变 · 只记录',
+        rows.append(kv('', {'matches': '换了节点，出口没变 · 只记录',
                             'changed': '换了节点，出口 IP 也变了',
                             'unconfirmed': '换了节点；没有出口基准可比'}.get(
             state, '换了节点；出口没查，无法判断'), 'dim' if state == 'matches' else 'warn'))
@@ -262,7 +262,7 @@ def route_verdict(report, rep, item):
     rtone, rlabel, rwhy = reputation_verdict(rep, item)
     stable = (rep.get('probe') or {}).get('observed_stable')
     if rtone == 'ok':
-        return 'ok', '线路正常', prefix + ('出口稳定 · ' if stable else '') + rwhy
+        return 'ok', '线路正常', prefix + ('出口稳定 · ' if stable and not moved else '') + rwhy
     return rtone, rlabel or '线路正常', rwhy
 
 
