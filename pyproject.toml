@@ -25,7 +25,7 @@ Documentation = "https://github.com/majiayu000/claude-route-watch/blob/main/docs
 Issues = "https://github.com/majiayu000/claude-route-watch/issues"
 
 [tool.setuptools]
-py-modules = ["claude_route_watch", "exit_probe", "ip_reputation", "desktop"]
+py-modules = ["claude_route_watch", "exit_probe", "ip_reputation", "panels", "terminal", "views", "desktop"]
 
 [tool.setuptools.data-files]
 "docs" = ["docs/app.html"]

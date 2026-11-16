@@ -7,7 +7,7 @@ import os
 import time
 from urllib.parse import quote, urlencode
 
-from exit_probe import FetchError, fetch_json, utc_now
+from exit_probe import FetchError, fetch_json, progress, utc_now
 
 DOCS = {
     'ipapi.is': 'https://ipapi.is/developers.html',
@@ -242,6 +242,61 @@ def lookup_provider(provider, ip, proxy, credentials, cache):
     return report
 
 
+def metric_level(provider, metric):
+    """0–3 severity (A–D) for one graded IP metric; None when the metric is not graded."""
+    value = metric.get('value')
+    if value is None or metric.get('scope') != 'IP':
+        return None
+    if provider == 'scamalytics' and metric.get('name') == 'scamalytics_score':
+        return 3 if value >= 90 else 2 if value >= 60 else 1 if value >= 20 else 0
+    if provider == 'abuseipdb' and metric.get('name') == 'abuseConfidenceScore':
+        return 3 if value >= 75 else 2 if value >= 25 else 1 if value > 0 else 0
+    return None
+
+
+def rate_ip(providers, country_comparison, disagreements):
+    """Our disclosed evidence grade, not an IP safety score or calibrated probability."""
+    ready = {report['provider'] for report in providers if report['status'] == 'ok'}
+    missing = [provider for provider in DOCS if provider not in ready]
+    result = {'version': 1, 'grade': None, 'label': '资料不足，暂不评级',
+              'scope': 'Provider risk evidence only; not network performance or Claude eligibility',
+              'ready_sources': len(ready), 'required_sources': len(DOCS),
+              'incomplete_sources': missing, 'reasons': []}
+    # Keep known adverse evidence even when missing sources prevent a complete grade.
+    severity = 0
+    for report in providers:
+        if report['status'] not in ('ok', 'partial'):
+            continue
+        for metric in report['scores']:
+            value = metric['value']
+            if value is None or metric.get('scope') != 'IP':
+                continue
+            level = metric_level(report['provider'], metric)
+            if level is None:
+                continue
+            if report['provider'] == 'scamalytics':
+                result['reasons'].append(f'Scamalytics IP 欺诈分={value}；A/B/C/D 区间为 0–19 / 20–59 / 60–89 / 90–100')
+            else:
+                result['reasons'].append(f'AbuseIPDB 滥用置信度={value}；本站 A/B/C/D 区间为 0 / 1–24 / 25–74 / 75–100')
+            severity = max(severity, level)
+        if report['flags'].get('abuser') is True:
+            severity = max(severity, 1)
+            result['reasons'].append(report['provider'] + '：存在滥用标记，至少 B 级')
+        if report['flags'].get('external_blacklist') is True:
+            severity = max(severity, 2)
+            result['reasons'].append(report['provider'] + '：命中来源黑名单，至少 C 级；请核对明细')
+        if report['provider'] == 'abuseipdb' and (report['details'].get('total_reports') or 0) > 0:
+            severity = max(severity, 1)
+            result['reasons'].append('AbuseIPDB：查询窗口内有举报，至少 B 级；请核对举报时间和次数')
+    if country_comparison == 'disagreement' or disagreements:
+        severity = max(severity, 1)
+        result['reasons'].append('来源对国家或网络标签判断不一致，至少 B 级；请逐来源核对')
+    if not missing:
+        result['grade'] = 'ABCD'[severity]
+        result['label'] = ('已查来源低风险', '存在待核对信号', '风险信号较强', '风险信号很强')[severity]
+    return result
+
+
 def summarize_ip(ip, providers):
     countries = {report['provider']: report['geo']['country_code'] for report in providers if report['geo']['country_code']}
     comparison = ('insufficient_data' if len(countries) < 2 else
@@ -272,6 +327,7 @@ def summarize_ip(ip, providers):
         evidence = ', '.join(f'{source}={value}' for source, value in sorted(disagreement['values'].items()))
         advisories.append(f'Providers disagree about {disagreement["field"]} for {ip}: {evidence}')
     return {'ip': ip, 'providers': providers,
+            'rating': rate_ip(providers, comparison, disagreements),
             'country_comparison': {'status': comparison, 'values': countries,
                                    'note': 'Country names are not guessed into codes; sources may share upstream data'},
             'flag_disagreements': disagreements, 'advisories': advisories,
@@ -289,14 +345,18 @@ def lookup_reputation(ips, proxy, *, cache=None, credentials=None):
     addresses = sorted({public_ip(ip) for ip in ips})
     reports = []
     for ip in addresses:
-        providers = [lookup_provider(provider, ip, proxy, credentials, cache) for provider in DOCS]
+        providers = []
+        for provider in DOCS:
+            progress('source', provider=provider)
+            providers.append(lookup_provider(provider, ip, proxy, credentials, cache))
+            progress('source_done', provider=provider, status=providers[-1]['status'])
         reports.append(summarize_ip(ip, providers))
     statuses = [provider['status'] for report in reports for provider in report['providers']]
     status = ('complete' if statuses and all(value == 'ok' for value in statuses) else
               ('partial' if any(value in ('ok', 'partial') for value in statuses) else 'unknown'))
     return {'status': status, 'checked_at': utc_now(), 'ip_reports': reports,
             'warnings': [item for report in reports for item in report['advisories']],
-            'interpretation': 'Vendor evidence only: no aggregate IP safety score or Claude-ban probability'}
+            'interpretation': 'Provider evidence plus our versioned A–D evidence grade; no aggregate IP safety score or Claude-ban probability'}
 
 
 def collect_reputation(proxy, expected, read_connections, *, cache=None, previous_ips=None, credentials=None):
