@@ -19,6 +19,17 @@ jobs:
       - run: python -m pip wheel --no-deps . --wheel-dir dist
       - run: claude-route-watch --help
         working-directory: ${{ runner.temp }}
+      - run: python scripts/build-terminal.py
+      - run: python dist/claude-route-watch.pyz --help
+      - run: sh dist/claude-route-watch.sh --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terminal-${{ matrix.os }}-${{ matrix.python }}
+          path: |
+            dist/Claude-Route-Watch-terminal.zip
+            dist/claude-route-watch.pyz
+            dist/claude-route-watch.sh
+            dist/SHA256SUMS
   desktop:
     runs-on: macos-latest
     steps:

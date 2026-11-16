@@ -1,4 +1,4 @@
-"""HTTPS through an explicit loopback HTTP proxy, with Mihomo route evidence."""
+"""HTTPS directly or through an explicit loopback HTTP proxy, with optional route evidence."""
 import base64
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -11,6 +11,21 @@ import time
 from urllib.parse import unquote, urlsplit
 
 PROBE_URL = 'https://api64.ipify.org/?format=json'
+
+
+_progress = None
+
+
+def set_progress(callback):
+    """Install a callback(stage, info) for live terminal progress; None disables it."""
+    global _progress
+    previous, _progress = _progress, callback
+    return previous
+
+
+def progress(stage, **info):
+    if _progress is not None:
+        _progress(stage, info)
 
 
 def utc_now():
@@ -49,14 +64,18 @@ def https_tunnel(url, proxy):
     target = urlsplit(url)
     if target.scheme != 'https' or not target.hostname or target.username or target.password or target.fragment:
         raise ValueError('HTTPS target without credentials required')
-    local_proxy = parse_proxy(proxy)
     auth = {}
-    if local_proxy.username is not None:
-        credentials = unquote(local_proxy.username) + ':' + unquote(local_proxy.password or '')
-        auth['Proxy-Authorization'] = 'Basic ' + base64.b64encode(credentials.encode()).decode()
-    connection = http.client.HTTPSConnection(local_proxy.hostname, local_proxy.port,
-                                             timeout=8, context=ssl.create_default_context())
-    connection.set_tunnel(target.hostname, target.port or 443, headers=auth)
+    if proxy is None:
+        connection = http.client.HTTPSConnection(target.hostname, target.port or 443,
+                                                 timeout=8, context=ssl.create_default_context())
+    else:
+        local_proxy = parse_proxy(proxy)
+        if local_proxy.username is not None:
+            credentials = unquote(local_proxy.username) + ':' + unquote(local_proxy.password or '')
+            auth['Proxy-Authorization'] = 'Basic ' + base64.b64encode(credentials.encode()).decode()
+        connection = http.client.HTTPSConnection(local_proxy.hostname, local_proxy.port,
+                                                 timeout=8, context=ssl.create_default_context())
+        connection.set_tunnel(target.hostname, target.port or 443, headers=auth)
     try:
         connection.connect()
         yield connection, target
@@ -79,6 +98,8 @@ def retry_seconds(value):
 
 def fetch_json(url, proxy, *, payload=None, headers=None, observe=None):
     """No redirects, environment proxy fallback, or disabled TLS verification."""
+    if observe is not None and proxy is None:
+        raise ValueError('Route attribution requires an explicit loopback HTTP proxy')
     with https_tunnel(url, proxy) as (connection, target):
         evidence = observe(connection.sock.getsockname(), target.hostname) if observe else None
         if evidence is not None and evidence['status'] != 'verified':
@@ -136,7 +157,8 @@ def probe_exit(proxy, expected, read_connections, samples=3):
         raise ValueError('At least two samples are needed to describe observed stability')
     started = time.monotonic()
     observations = []
-    for _ in range(samples):
+    for index in range(samples):
+        progress('probe', index=index + 1, total=samples, node=expected)
         sample = {'checked_at': utc_now(), 'status': 'unknown', 'ip': None}
         try:
             def observe(local, host):

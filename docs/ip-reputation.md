@@ -2,6 +2,14 @@
 
 This feature answers two separate questions: **which public IP did a route-verified echo request use**, and **what do external intelligence providers report about that IP**? It does not expose Anthropic's risk decisions or predict account suspension.
 
+## Terminal menu and VPS direct-IP checks
+
+Run the standalone `sh claude-route-watch.sh` for a number menu, or `sh run.sh` from the checkout. The `.sh` embeds the entire terminal program; only Python 3.10+ is needed. The `.pyz` can also be run directly with Python. Use `--ip` for a compact one-shot report, `--ip --details` for full source evidence and `--ip --json` for automation. In the menu, `d` opens details from the result already fetched; Enter returns and 0 exits. The summary stays visible until you act. This mode requires no Clash, no controller and no provider keys for basic ownership/location. Anonymous or missing advanced evidence remains partial, not safe.
+
+Direct mode observes a single public echo IP, then queries that exact address. It ignores HTTP proxy environment variables; system routing, VPNs and TUN can still affect the connection. It does not claim to observe every IPv4/IPv6 exit, prove route stability, or identify Claude's actual exit. Direct mode never enables route attribution and cannot be combined with route-watch or explicit proxy options. Explicit routed checks still require a loopback HTTP proxy and never fall back to direct access.
+
+The menu discovers final proxy nodes and the HTTP/mixed port, asks the user to select an expected node, and separately asks whether to enable third-party IP queries. Merely opening the menu or help makes no external requests. No preferences or keys are written, reports are not uploaded, and no background service is installed. Basic direct checks do contact ipify and ipapi.is; configured advanced sources receive queries too. Exit 2 includes a usable anonymous result with incomplete source coverage.
+
 ## Desktop: no commands or environment variables
 
 The macOS preview discovers Clash Verge and suggests the observed Claude node. Click **开始监测** to pin the baseline, then **开启 IP 检查** to opt into third-party probes. Full keys are optional password fields in the collapsed settings panel. They are session-only, never saved to the preferences file or `.env`. The desktop passes that explicit credential mapping to the same library used by the CLI.
@@ -22,7 +30,7 @@ Use your client's actual HTTP/mixed port. It must be an explicit **loopback HTTP
 
 The Unix controller still needs to be available; use the existing `--socket`, `--config`, or `MIHOMO_SECRET` options when auto-discovery does not apply. A remote HTTP proxy cannot be attributed to the local controller and is not supported by this probe.
 
-Without `--reputation`, no exit or provider requests are made. The original routing-only command remains usable without provider accounts.
+Routing checks without `--reputation` make no exit or provider requests. The separate `--ip` mode explicitly opts into direct queries. The routing-only command remains usable without provider accounts.
 
 ## 1. Verify the route before trusting the IP
 
@@ -67,7 +75,7 @@ Credentials are read from environment variables only; the program never writes `
 
 Missing keys are reported as `skipped`, with the missing variable **names**, never their values. A rejected configured key reports an error: it is not silently retried anonymously.
 
-The opt-in transmits the observed IP to ipify and configured intelligence services. Providers can also see the network address used to query them and their API account identity. No Claude credentials, prompts, files, transcripts, or process paths are sent. Queries go through the explicit TLS tunnel; there is no project-operated backend or automatic report upload.
+The opt-in transmits the observed IP to ipify and configured intelligence services. Providers can also see the network address used to query them and their API account identity. No Claude credentials, prompts, files, transcripts, or process paths are sent. Routed queries go through the explicit TLS tunnel; standalone --ip queries connect directly using verified TLS. There is no project-operated backend or automatic report upload.
 
 ## 3. Read each source in its own terms
 
@@ -137,6 +145,23 @@ Country comparison requires at least two available **country codes**. One source
 
 Disagreeing country codes and contradictory boolean proxy/network labels retain each provider's value. No majority vote, best-looking-source selection, or average score is computed. Several feeds may share upstream data; they are not independent votes.
 
+### Our A–D evidence grade v1
+
+Each IP report now contains `rating`, computed from normalized provider evidence. This is our own review heuristic, not a vendor certification, network-speed score, aggregate numeric safety score, or account-ban probability. The original routing score, vendor metrics and coverage status retain their meanings.
+
+| Evidence | A | B | C | D |
+| --- | --- | --- | --- | --- |
+| Scamalytics IP fraud score | 0–19 | 20–59 | 60–89 | 90–100 |
+| AbuseIPDB confidence — **our chosen bands**, not AbuseIPDB's official risk classes | 0 | 1–24 | 25–74 | 75–100 |
+
+The strongest signal determines the grade. Additional floors: an abuser flag, nonzero reports within the queried AbuseIPDB window, or country/network-label disagreement requires at least B; an external-blacklist flag requires at least C. These floors are review priorities, not proof of malicious activity. Datacenter, VPN, proxy and Tor classifications remain visible labels and do not independently subtract points. ISP/network-wide scores are excluded from the IP grade. No source scores are added or averaged, and overlapping blacklists do not receive multiple deductions.
+
+All three configured sources (`ipapi.is`, `scamalytics`, `abuseipdb`) must return `status=ok` under their existing primary-field checks before a letter is assigned. Partial, missing-key, error, rate-limited or absent sources leave `rating.grade=null`, with **资料不足，暂不评级**, the incomplete source names and any already-known risk evidence. Basic anonymous usage is still supported, but normally cannot receive a letter. An A therefore means only “the checked sources have low risk under rule v1,” never “safe for Claude.” Optional fields can still be unknown.
+
+The JSON includes the rule version, grade/label, ready/required source counts, incomplete sources and reasons. No persistent record or cache migration is needed: the grade is derived anew from existing normalized source reports, including cached provider responses. Existing running or downloaded packages keep their previous behavior until replaced/restarted; old saved JSON is not retroactively rewritten. Terminal output expects reports generated by the current library.
+
+Decision: expose explainable grades to make the terminal easier to read, retain all original evidence, and withhold grading rather than treating unknown fields as clean. No arbitrary country/ASN bans, numeric score fusion or Claude-specific safety claim. The thresholds are not calibrated against real-world fraud or suspension outcomes. Revise the version if the policy changes.
+
 ### Alerts and exit codes
 
 Review advisories include route-unverified probes, changing/rotating echo IPs, country or label disagreements, an IP flagged for abuse or an external blacklist, nonzero AbuseIPDB confidence, and a non-low Scamalytics risk label. A datacenter/VPN/residential label alone is informational: it is not automatically an account-risk verdict.
@@ -154,7 +179,7 @@ Exit code priorities:
 5. Partial IP coverage without concrete advisories: **2**.
 6. Observations match with requested source coverage: **0**.
 
-Without `--reputation`, the existing routing-only behavior applies. An exit code of 0 is never a guarantee of continued Claude access.
+For route commands without `--reputation`, the routing-only behavior applies. Direct `--ip` checks use the reputation coverage exit codes above. An exit code of 0 is never a guarantee of continued Claude access.
 
 ## 5. Refresh, cache, and stopping
 
