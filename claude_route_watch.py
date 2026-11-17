@@ -158,6 +158,13 @@ def notify(title, message):
 
 
 def main(argv=None, report_output=None):
+    try:
+        return _main(argv, report_output)
+    except KeyboardInterrupt:
+        return 0  # Ctrl-C is the documented way to stop; the console script must not print a traceback.
+
+
+def _main(argv=None, report_output=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -338,7 +345,4 @@ def main(argv=None, report_output=None):
 
 
 if __name__ == '__main__':
-    try:
-        raise SystemExit(main())
-    except KeyboardInterrupt:
-        pass
+    raise SystemExit(main())

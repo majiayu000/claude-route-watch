@@ -84,6 +84,15 @@ class Routes(unittest.TestCase):
         self.assertIsNone(report['score'])
         self.assertNotIn('secret-do-not-print', output.getvalue())
 
+    def test_cli_ctrl_c_stops_watch_quietly(self):
+        output = io.StringIO()
+        with patch('sys.argv', ['watch', '--expect', 'Expected proxy', '--watch']), contextlib.redirect_stdout(output), patch('claude_route_watch.request', side_effect=OSError), patch('claude_route_watch.time.sleep', side_effect=KeyboardInterrupt):
+            try:
+                code = main()
+            except KeyboardInterrupt:
+                self.fail('Ctrl-C escaped main(); the console script would print a traceback')
+        self.assertEqual(code, 0)
+
 
 class ReputationCLI(unittest.TestCase):
     def runtime(self, endpoint, *args):
