@@ -43,12 +43,16 @@ Decision: add the small menu and an explicit direct-IP path, reuse the routed ob
 **[Download the macOS Apple Silicon preview](https://github.com/majiayu000/claude-route-watch/releases/tag/v0.3.0-preview.1)**
 
 1. Unzip, move **Claude Route Watch.app** into Applications, and double-click it. No Python, Terminal, or package installation is needed.
-2. Keep Clash Verge running. The app discovers its controller, HTTP/mixed port, and Claude's current node. Confirm the suggested node with **开始监测** (Start monitoring).
-3. For optional exit/IP intelligence, turn on **开启 IP 检查**. Basic ownership works without keys. Full provider keys can be entered in the optional panel; they stay in memory for this launch only.
+2. Keep Clash Verge running. The app discovers its controller, HTTP/mixed port, and Claude's current node. Choose the current node with **开始监测** (Start monitoring). The desktop app records node changes without treating names as public exits.
+3. Turn on **开启 IP 检查** to verify the public exit. The first stable, route-attributed IP on the selected starting node becomes the saved baseline. Later probes follow the currently observed Claude node and compare IPs against that same baseline. Basic ownership works without keys. Full provider keys can be entered in the optional panel; they stay in memory for this launch only.
 
-The app remembers your explicitly chosen baseline, monitoring state, and notification preference. It never silently adopts a changed route. IP queries start off on each launch. Minimize the window to continue watching; closing it exits the app. No login service or hidden daemon is installed.
+The app remembers the starting node, confirmed public-IP baseline, monitoring state, and notification preference. A different node with the same verified public IP stays quiet; a different IP on the same node is reported. It never silently adopts a changed IP. Pausing and resuming keep the confirmed baseline, including when the selected node changes. Use **重新确认出口** only when you want to replace the baseline; this clears the old baseline and waits for a stable probe on the selected node. IP queries start off on each launch. Minimize the window to continue watching; closing it exits the app. No login service or hidden daemon is installed.
 
 This preview is **ad-hoc signed, not Developer ID signed or notarized**. macOS may require approval for a downloaded app; do not disable Gatekeeper globally. The packaged preview targets Apple Silicon macOS and Clash Verge; Windows GUI/controller support is not implemented.
+
+Desktop notifications are limited to confirmed Claude `DIRECT` connections, verified public-IP differences from the baseline, and verified recovery. Identical alarms are deduplicated even when destination hosts change. Missing connections, unavailable probes, mixed Claude nodes, incomplete reputation sources, and node-name differences remain visible in the app without notification. Without IP checks, public-exit status stays unknown. When the observed route changes, prior probe results are discarded and a new check is scheduled. A failed check cannot report recovery.
+
+The desktop's exit status is separate from the CLI/library's original node-based routing score, which remains available in raw evidence. Only an echo-service IP is measured; this cannot prove the exact IP Anthropic sees.
 
 ## Terminal verification (2026-11-16)
 
@@ -170,3 +174,9 @@ The predecessor was exercised against live macOS Clash Verge API/download/log/br
 Decision: ship a small local observer with explainable routing points; do not publish a ban predictor. Unknown evidence must never become a green score. Do not use this as a complete network-enforcement boundary.
 
 Sources: [Mihomo controller API](https://wiki.metacubex.one/en/api/), [Claude Code network requirements](https://code.claude.com/docs/en/network-config). The weights and overrides above are this project's choices, not claims made by those sources.
+
+### Desktop exit-alert decision (2026-11-16)
+
+Adopt public-IP comparison for desktop alerts; reject node-name equality as an exit anomaly. Acceptance: changing node names with the same verified IP stays quiet; changing IP on the same node alerts once and preserves the baseline. Missing or stale attribution stops exit conclusions. The existing explicit opt-in for external IP services remains in place; no proxy settings are changed. CLI node-based scoring is unchanged.
+
+Verification for this local change: synthetic desktop cases exercised alternate-node/same-IP silence, same-node/different-IP notification, unchanged-alarm deduplication, unknown evidence without false recovery, DIRECT traffic, rotation, preserved baselines across pause/restart, and stale in-flight result rejection. Browser rendering showed the matching, changed and unknown verdicts and submitted the selected reset node without script errors or horizontal overflow. A read-only live probe made three new connections through the current observed Claude node; all three socket routes were attributed and returned one stable public IP. No live proxy switch was performed. This is not evidence of Anthropic-side IP identity, long-running behavior, or notification-center display. Local packaging and ad-hoc signature verification are separate from installation and public release.
