@@ -18,6 +18,8 @@ import time
 from exit_probe import parse_proxy
 from ip_reputation import collect_reputation
 
+SCOPE = 'Mihomo-visible active Claude connections only'
+
 
 class UnixHTTP(http.client.HTTPConnection):
     def __init__(self, path):
@@ -111,7 +113,7 @@ def analyze(config, connections, expected):
     status = 'unknown' if score is None else ('warning' if issues else 'observed_ok')
     return {
         'scoring_version': 1, 'score': score, 'status': status, 'expected': expected,
-        'scope': 'Mihomo-visible active Claude connections only',
+        'scope': SCOPE,
         'observed_connections': total, 'components': components,
         'observed_endpoints': sorted(endpoints),
         'issues': sorted(issues),
@@ -158,6 +160,13 @@ def notify(title, message):
 
 
 def main(argv=None, report_output=None):
+    try:
+        return _main(argv, report_output)
+    except KeyboardInterrupt:
+        return 0  # Ctrl-C is the documented way to stop; the console script must not print a traceback.
+
+
+def _main(argv=None, report_output=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -244,8 +253,13 @@ def main(argv=None, report_output=None):
                              request('/connections', args.config, args.socket), args.expect)
         except (OSError, ValueError, KeyError, TypeError, AttributeError, http.client.HTTPException, RuntimeError):
             # Never print raw exceptions: they may contain credentials or local paths.
-            report = {'scoring_version': 1, 'score': None, 'status': 'unknown',
-                      'expected': args.expect, 'issues': ['Cannot read Mihomo runtime; monitoring unavailable']}
+            # Same keys as analyze(): nothing was observed, so counts and components stay null.
+            report = {'scoring_version': 1, 'score': None, 'status': 'unknown', 'expected': args.expect,
+                      'scope': SCOPE, 'observed_connections': None,
+                      'components': {'route_match': None, 'endpoint_consistency': None, 'tun_coverage': None},
+                      'observed_endpoints': [],
+                      'issues': ['Cannot read Mihomo runtime; monitoring unavailable'],
+                      'node_changes': [], 'connections': []}
             runtime_available = False
         if args.reputation:
             try:
@@ -338,7 +352,4 @@ def main(argv=None, report_output=None):
 
 
 if __name__ == '__main__':
-    try:
-        raise SystemExit(main())
-    except KeyboardInterrupt:
-        pass
+    raise SystemExit(main())
