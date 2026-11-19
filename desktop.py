@@ -11,7 +11,7 @@ import sys
 
 from claude_route_watch import analyze, belongs_to_claude, notify, request
 from exit_probe import utc_now
-from ip_reputation import collect_reputation
+from ip_reputation import collect_reputation, public_ip
 
 CREDENTIAL_NAMES = ('IPAPI_IS_KEY', 'SCAMALYTICS_USERNAME', 'SCAMALYTICS_KEY', 'SCAMALYTICS_REGION', 'ABUSEIPDB_KEY')
 
@@ -23,6 +23,7 @@ class DesktopState:
         self._lock = threading.RLock()
         self._closed = threading.Event()
         self._expected, self._monitoring, self._notifications = None, False, True
+        self._baseline_ips = None
         self._settings_error = None
         try:
             saved = json.loads(self._path.read_text()) if self._path.exists() else {}
@@ -34,7 +35,13 @@ class DesktopState:
                 raise ValueError('Invalid saved endpoint')
             self._monitoring = saved.get('monitoring') is True and bool(self._expected)
             self._notifications = saved.get('notifications', True) is True
+            baseline = saved.get('baseline_ips')
+            if baseline is not None:
+                if not isinstance(baseline, list) or not baseline:
+                    raise ValueError('Invalid saved exit')
+                self._baseline_ips = sorted({public_ip(ip) for ip in baseline})
         except (OSError, ValueError):
+            self._monitoring = False
             self._settings_error = '上次的设置无法读取。请重新选择线路后开始监测，原文件暂未改写。'
         self._credentials = {key: os.environ[key] for key in CREDENTIAL_NAMES if os.environ.get(key)}
         self._nodes, self._observed = [], []
@@ -45,13 +52,15 @@ class DesktopState:
         self._revision, self._next_ip_check = 0, 0
         self._checked_at, self._last_notice = None, None
         self._notification_error = None
+        self._probe_context = None
 
-    def _save(self, expected, monitoring, notifications):
+    def _save(self, expected, monitoring, notifications, baseline_ips):
         self._path.parent.mkdir(parents=True, exist_ok=True)
         fd, name = tempfile.mkstemp(prefix='.settings-', dir=self._path.parent)
         try:
             with os.fdopen(fd, 'w') as stream:
-                json.dump({'expected': expected, 'monitoring': monitoring, 'notifications': notifications}, stream)
+                json.dump({'expected': expected, 'monitoring': monitoring, 'notifications': notifications,
+                           'baseline_ips': baseline_ips}, stream)
             os.replace(name, self._path)
         finally:
             if os.path.exists(name):
@@ -67,6 +76,7 @@ class DesktopState:
                 'expected': self._expected, 'monitoring': self._monitoring, 'notifications': self._notifications,
                 'proxy_available': self._proxy is not None, 'checked_at': self._checked_at,
                 'route': self._report, 'ip_enabled': self._ip_enabled, 'ip_busy': self._ip_busy, 'reputation': self._ip_report,
+                'exit': self._exit_status(),
                 'credentials_available': {'ipapi.is': bool(self._credentials.get('IPAPI_IS_KEY')),
                                           'scamalytics': bool(self._credentials.get('SCAMALYTICS_USERNAME') and self._credentials.get('SCAMALYTICS_KEY')),
                                           'abuseipdb': bool(self._credentials.get('ABUSEIPDB_KEY'))},
@@ -77,21 +87,23 @@ class DesktopState:
         with self._lock:
             if not self._connected or expected not in self._nodes:
                 return {'ok': False, 'message': '请先打开 Clash，再从列表中选择一条可用代理线路。'}
+            baseline_ips = None if self._monitoring else self._baseline_ips
             try:
-                self._save(expected, True, self._notifications)
+                self._save(expected, True, self._notifications, baseline_ips)
             except OSError:
                 return {'ok': False, 'message': '无法保存设置，请检查应用支持目录的写入权限。'}
             self._expected, self._monitoring = expected, True
+            self._baseline_ips = baseline_ips
             self._settings_error = None
             self._revision += 1
             self._report = self._ip_report = None
             self._previous_ips, self._last_notice, self._next_ip_check = None, None, 0
-        return {'ok': True, 'message': '已记住这条预期线路，正在监测。'}
+        return {'ok': True, 'message': '已恢复监测，继续使用已确认的出口基准。' if baseline_ips else '已开始监测。开启 IP 检查后，会以所选线路的首次稳定出口建立基准。'}
 
     def _pause(self):
         with self._lock:
             try:
-                self._save(self._expected, False, self._notifications)
+                self._save(self._expected, False, self._notifications, self._baseline_ips)
             except OSError:
                 return {'ok': False, 'message': '暂停设置无法保存；本次监测尚未停止。'}
             self._monitoring, self._ip_enabled = False, False
@@ -111,7 +123,6 @@ class DesktopState:
             self._report = None
             self._ip_report = None
             self._next_ip_check = 0
-            self._last_notice = None
         return {'ok': True, 'message': '已开启 IP 检查，第三方服务会收到探测出口 IP。' if enabled else '已关闭 IP 检查，正在进行的查询会结束。'}
 
     def _set_notifications(self, enabled):
@@ -119,13 +130,13 @@ class DesktopState:
             return {'ok': False, 'message': '通知设置无效。'}
         with self._lock:
             try:
-                self._save(self._expected, self._monitoring, enabled)
+                self._save(self._expected, self._monitoring, enabled, self._baseline_ips)
             except OSError:
                 return {'ok': False, 'message': '无法保存通知设置。'}
             self._notifications = enabled
             if not enabled:
                 self._notification_error = None
-        return {'ok': True, 'message': '异常时会请求 macOS 通知。' if enabled else '已关闭系统通知。'}
+        return {'ok': True, 'message': '确认直连或出口 IP 改变时通知；节点改名和证据不足只在界面显示。' if enabled else '已关闭系统通知。'}
 
     def _set_credentials(self, values):
         if not isinstance(values, dict) or any(key not in CREDENTIAL_NAMES or not isinstance(value, str) or len(value) > 8192 for key, value in values.items()):
@@ -145,6 +156,27 @@ class DesktopState:
             self._revision += 1
             self._ip_report, self._next_ip_check = None, 0
         return {'ok': True, 'message': '已清除用于后续检查的凭据；正在进行的查询会结束。'}
+
+    def _exit_status(self):
+        result = {'status': 'unknown', 'baseline_ips': self._baseline_ips, 'current_ips': [],
+                  'message': '尚未核验公网出口。', 'checked_at': None}
+        if not self._monitoring or not self._connected or not self._report:
+            return result
+        if 'DIRECT' in self._observed:
+            return dict(result, status='direct', message='发现 Claude 连接直连，请检查 Clash 分流。')
+        if not self._ip_enabled:
+            return dict(result, message='开启 IP 检查后才能确认公网出口。节点名称变化只作记录。')
+        if self._report['score'] is None or len(self._observed) != 1:
+            return dict(result, message='当前没有完整、单一的 Claude 代理链，暂时无法归属出口探测。')
+        probe = (self._ip_report or {}).get('probe', {})
+        if probe.get('status') != 'verified' or not probe.get('ips'):
+            return dict(result, message='正在核验公网出口。' if self._ip_busy else '本次出口探测未完成或无法归属，暂时无法确认。')
+        result.update(current_ips=probe['ips'], checked_at=probe.get('checked_at'))
+        if self._baseline_ips is None:
+            return dict(result, message='尚无出口基准：请选择当前线路并重新确认，等待一次稳定的 IP 检查。')
+        if sorted(probe['ips']) != self._baseline_ips:
+            return dict(result, status='changed', message='公网出口 IP 与已确认基准不同，请核对是否符合预期。')
+        return dict(result, status='matches', message='本次回显出口 IP 与已确认基准一致；节点名称变化不报警。')
 
     def _sample_once(self):
         with self._lock:
@@ -166,27 +198,38 @@ class DesktopState:
             self._connected, self._error, self._checked_at = connected, error, utc_now()
             if revision != self._revision or self._closed.is_set():
                 return
+            context = (proxy, tuple(observed), report is not None and report['score'] is not None)
+            if context != self._probe_context:
+                self._probe_context = context
+                self._revision += 1
+                self._ip_report, self._next_ip_check = None, 0
+            revision = self._revision
             self._report = report
-            if active and self._ip_enabled and proxy and not self._ip_busy and time.monotonic() >= self._next_ip_check:
+            can_probe = report and report['score'] is not None and len(observed) == 1 and observed[0] in nodes
+            if active and self._ip_enabled and proxy and can_probe and not self._ip_busy and time.monotonic() >= self._next_ip_check:
                 self._ip_busy = True
-                threading.Thread(target=self._check_ip, args=(revision, proxy, expected, dict(self._credentials), self._cache, self._previous_ips), daemon=True).start()
+                threading.Thread(target=self._check_ip, args=(revision, proxy, observed[0], dict(self._credentials), self._cache, self._previous_ips), daemon=True).start()
             if not active:
                 return
-            warnings = [error] if error else list(report.get('issues', []))
-            if self._ip_enabled and self._ip_report:
-                warnings += self._ip_report.get('warnings', [])
-                if self._ip_report.get('status') in ('partial', 'unknown'):
-                    warnings.append('IP 信誉证据不完整，请查看界面中的未检测项目。')
-            unknown = report is not None and report.get('score') is None
-            notice = (tuple(warnings), unknown)
+            exit_state = self._exit_status()
+            if exit_state['status'] == 'direct':
+                notice = ('direct',)
+            elif exit_state['status'] == 'changed':
+                notice = ('changed', tuple(sorted(exit_state['current_ips'])))
+            elif exit_state['status'] == 'matches':
+                notice = ()
+            else:
+                return  # Missing evidence is shown in the app, never an alarm or recovery.
             changed = notice != self._last_notice
-            recovering = self._last_notice is not None and (bool(self._last_notice[0]) or self._last_notice[1]) and not warnings and not unknown
+            recovering = bool(self._last_notice) and not notice
             self._last_notice = notice
             notifications = self._notifications
-        if changed and notifications and (warnings or unknown or recovering):
-            message = '；'.join(warnings)[:600] if warnings else ('暂无 Claude 活跃连接，等待新的连接。' if unknown else '当前观察已恢复符合预期。')
+        if changed and notifications and (notice or recovering):
+            message = exit_state['message'] if notice else '本次核验的公网出口 IP 已恢复符合基准。'
+            if exit_state['status'] == 'changed':
+                message += ' 基准：' + ', '.join(exit_state['baseline_ips']) + '；当前：' + ', '.join(exit_state['current_ips'])
             try:
-                self._notifier('Claude 线路观察', message)
+                self._notifier('Claude 出口观察', message)
                 with self._lock:
                     self._notification_error = None
             except Exception:
@@ -207,6 +250,14 @@ class DesktopState:
             self._next_ip_check = time.monotonic() + 300
             if result.get('probe', {}).get('status') == 'verified':
                 self._previous_ips = result['probe']['ips']
+                if self._baseline_ips is None and expected == self._expected and result['probe'].get('observed_stable') is True and len(self._previous_ips) == 1:
+                    try:
+                        self._save(self._expected, self._monitoring, self._notifications, self._previous_ips)
+                    except OSError:
+                        self._settings_error = '出口基准无法保存，暂时无法判断出口是否符合预期。'
+                    else:
+                        self._baseline_ips = list(self._previous_ips)
+                        self._settings_error = None
 
     def _run(self):
         while not self._closed.is_set():

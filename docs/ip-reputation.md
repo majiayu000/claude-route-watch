@@ -162,7 +162,13 @@ The JSON includes the rule version, grade/label, ready/required source counts, i
 
 Decision: expose explainable grades to make the terminal easier to read, retain all original evidence, and withhold grading rather than treating unknown fields as clean. No arbitrary country/ASN bans, numeric score fusion or Claude-specific safety claim. The thresholds are not calibrated against real-world fraud or suspension outcomes. Revise the version if the policy changes.
 
-### Alerts and exit codes
+### Desktop alerts
+
+The desktop app uses the first stable, route-verified IP on the explicitly selected starting node as its persisted exit baseline. Probes are subsequently attributed to the current single observed Claude node, so an alternate node with the same public IP does not trigger an alert. IP differences are compared to the saved baseline, not silently accepted as the next baseline. Choosing **重新确认出口** clears the baseline explicitly.
+
+Only confirmed DIRECT traffic, verified IP differences, and verified recovery trigger desktop notifications. Missing evidence and reputation-source warnings stay in the UI. No active connections, mixed nodes, missing chains, failed probes, or changed routes invalidate the current exit verdict; a new route requires a fresh probe. The desktop does not assume that a probe for one node covers other simultaneous Claude nodes. IP checks remain opt-in for each launch. CLI behavior below is unchanged.
+
+### CLI alerts and exit codes
 
 Review advisories include route-unverified probes, changing/rotating echo IPs, country or label disagreements, an IP flagged for abuse or an external blacklist, nonzero AbuseIPDB confidence, and a non-low Scamalytics risk label. A datacenter/VPN/residential label alone is informational: it is not automatically an account-risk verdict.
 
