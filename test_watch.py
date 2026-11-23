@@ -50,9 +50,16 @@ class Routes(unittest.TestCase):
         self.assertEqual(score([connection('DIRECT', 'platform.claude.com', 'Chrome')])['score'], 0)
         self.assertEqual(score([connection('DIRECT', 'x.sentry.io', 'Chrome')])['observed_connections'], 0)
 
+    def test_claude_app_and_subdomains_identified_without_process(self):
+        for host in ('claude.app', 'preview.livepreview.claude.app'):
+            with self.subTest(host=host):
+                self.assertEqual(score([connection('DIRECT', host, '')])['score'], 0)
+
     def test_suffix_matching_does_not_accept_impostor(self):
-        row = connection('DIRECT', 'anthropic.com.example.org', 'Chrome')
-        self.assertEqual(score([row])['observed_connections'], 0)
+        for host in ('anthropic.com.example.org', 'notclaude.app', 'claude.app.example.org'):
+            with self.subTest(host=host):
+                row = connection('DIRECT', host, 'Chrome')
+                self.assertEqual(score([row])['observed_connections'], 0)
 
     def test_tun_off_reduces_observed_score_and_warns(self):
         report = score([connection('Expected proxy')], tun=False)

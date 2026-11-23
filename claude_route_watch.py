@@ -61,7 +61,8 @@ def belongs_to_claude(metadata):
     return (process in ('claude', 'claude.exe') or process.startswith('claude helper')
             or '/.local/share/claude/versions/' in path or '/claude.app/' in path
             or any(host == d or host.endswith('.' + d) for d in
-                   ('anthropic.com', 'claude.ai', 'claude.com', 'claudeusercontent.com', 'claudemcpcontent.com')))
+                   ('anthropic.com', 'claude.ai', 'claude.com', 'claude.app',
+                    'claudeusercontent.com', 'claudemcpcontent.com')))
 
 
 def analyze(config, connections, expected):
